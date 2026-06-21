@@ -18,12 +18,24 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 task_manager = TaskManager.get_instance()
 
 
+def _decode_file(content: bytes, filename: str) -> str:
+    encodings = ["utf-8", "utf-8-sig", "gbk", "gb2312", "gb18030", "latin-1"]
+    for enc in encodings:
+        try:
+            return content.decode(enc)
+        except Exception:
+            continue
+    logger.warning(f"Failed to decode file {filename}, falling back to utf-8 with errors ignored")
+    return content.decode("utf-8", errors="ignore")
+
+
 @router.post("", response_model=TaskResponse, status_code=202)
 async def create_task(
     source_type: InputSourceType = Form(...),
     text: Optional[str] = Form(None),
     urls: Optional[str] = Form(None),
     custom_dict: Optional[UploadFile] = File(None),
+    files: Optional[List[UploadFile]] = File(None),
 ):
     try:
         custom_dict_csv: Optional[str] = None
@@ -35,10 +47,25 @@ async def create_task(
         if urls:
             urls_list = [u.strip() for u in urls.split(",") if u.strip()]
 
+        files_list: Optional[List[dict]] = None
+        if source_type == InputSourceType.FILE and files:
+            files_list = []
+            for f in files:
+                try:
+                    raw = await f.read()
+                    decoded = _decode_file(raw, f.filename or "unknown")
+                    files_list.append({
+                        "filename": f.filename or "unknown",
+                        "content": decoded,
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to read uploaded file {getattr(f, 'filename', 'unknown')}: {e}")
+
         request = TaskCreateRequest(
             source_type=source_type,
             text=text,
             urls=urls_list,
+            files=files_list,
             custom_dict_csv=custom_dict_csv,
         )
 
@@ -46,6 +73,8 @@ async def create_task(
             raise HTTPException(status_code=400, detail="text is required for TEXT source type")
         if source_type == InputSourceType.URL and not request.urls:
             raise HTTPException(status_code=400, detail="urls is required for URL source type")
+        if source_type == InputSourceType.FILE and not request.files:
+            raise HTTPException(status_code=400, detail="at least one .txt/.md file is required for FILE source type")
 
         response = task_manager.submit_task(request)
         return response

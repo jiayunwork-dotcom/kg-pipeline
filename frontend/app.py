@@ -429,7 +429,7 @@ def page_input():
     st.title("📝 文档输入与处理")
     st.markdown("---")
 
-    tab1, tab2, tab3 = st.tabs(["✏️ 直接输入文本", "🌐 URL列表", "📚 自定义实体词典"])
+    tab1, tab2, tab3, tab4 = st.tabs(["✏️ 直接输入文本", "📂 批量上传文件", "🌐 URL列表", "📚 自定义实体词典"])
 
     with tab1:
         input_text = st.text_area(
@@ -465,6 +465,59 @@ def page_input():
                         st.error(f"❌ 任务提交异常: {e}")
 
     with tab2:
+        st.markdown("""
+        **支持批量上传多个 `.txt` 或 `.md` (Markdown) 文件**
+
+        💡 每个文件会作为独立文档进行实体关系抽取，自动检测文件编码（UTF-8/GBK等）
+        """)
+
+        uploaded_files = st.file_uploader(
+            "📤 选择文件（可多选）",
+            type=["txt", "md", "markdown"],
+            accept_multiple_files=True,
+            help="支持 .txt 和 .md/.markdown 文件，可一次选择多个",
+        )
+
+        if uploaded_files:
+            st.info(f"已选择 {len(uploaded_files)} 个文件:")
+            for f in uploaded_files:
+                try:
+                    raw_size = len(f.getvalue())
+                    size_kb = raw_size / 1024
+                    st.caption(f"  • {f.name} — {size_kb:.1f} KB")
+                except Exception as e:
+                    st.warning(f"  • {f.name} — 无法读取: {e}")
+
+        if st.button("🚀 上传并处理文件", key="submit_files", type="primary"):
+            if not uploaded_files:
+                st.warning("请先选择至少一个 .txt 或 .md 文件")
+            else:
+                with st.spinner(f"正在上传并处理 {len(uploaded_files)} 个文件..."):
+                    try:
+                        file_tuples = []
+                        for f in uploaded_files:
+                            f.seek(0)
+                            content_bytes = f.getvalue()
+                            mime = "text/markdown" if f.name.lower().endswith((".md", ".markdown")) else "text/plain"
+                            file_tuples.append((f.name, content_bytes, mime))
+
+                        result = client.create_task_files(file_tuples)
+                        if result:
+                            task_id = result.get('task_id', '')
+                            total_docs = result.get('total_documents', 0)
+                            st.success(f"✅ 任务已提交！任务ID: `{task_id}`")
+                            st.info(f"文件数量: {len(uploaded_files)}, 当前状态: {result.get('status', '')}")
+                            st.caption("💡 每个文件作为独立文档处理，前往任务管理页面查看进度")
+                            st.session_state["submitted_task_id"] = task_id
+
+                            if st.button("📋 跳转到任务管理查看进度", key="goto_tasks_from_file", type="secondary"):
+                                switch_page("tasks")
+                        else:
+                            st.error("❌ 文件上传失败，请检查文件格式和API服务状态")
+                    except Exception as e:
+                        st.error(f"❌ 文件上传异常: {e}")
+
+    with tab3:
         urls_text = st.text_area(
             "输入URL列表（每行一个）",
             height=200,
@@ -486,14 +539,14 @@ def page_input():
                             st.caption("💡 URL抓取和解析需要一些时间，请前往任务管理页面查看进度")
                             st.session_state["submitted_task_id"] = task_id
 
-                            if st.button("📋 跳转到任务管理查看进度", type="secondary"):
+                            if st.button("📋 跳转到任务管理查看进度", key="goto_tasks_from_url", type="secondary"):
                                 switch_page("tasks")
                         else:
                             st.error("❌ 任务提交失败，请检查URL格式和网络连接")
                     except Exception as e:
                         st.error(f"❌ 任务提交异常: {e}")
 
-    with tab3:
+    with tab4:
         st.markdown("""
         上传自定义实体词典可以增强实体识别效果。
 

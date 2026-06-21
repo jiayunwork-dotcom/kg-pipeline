@@ -31,6 +31,15 @@ class APIClient:
             logger.error(f"POST {endpoint} failed: {e}")
             return None
 
+    def _post_multipart(self, endpoint: str, data: Optional[Dict] = None, files: Optional[List] = None) -> Any:
+        try:
+            resp = requests.post(f"{self.base_url}{endpoint}", data=data, files=files, timeout=120)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.error(f"POST multipart {endpoint} failed: {e}")
+            return None
+
     def health_check(self) -> bool:
         result = self._get("/health")
         return result is not None
@@ -52,6 +61,16 @@ class APIClient:
         if custom_dict_csv:
             data["custom_dict_csv"] = custom_dict_csv
         return self._post("/api/tasks/json", json_data=data)
+
+    def create_task_files(self, file_tuples: List, custom_dict_csv: Optional[str] = None) -> Optional[Dict]:
+        data = {"source_type": "file"}
+        files = []
+        for name, content_bytes, mime in file_tuples:
+            files.append(("files", (name, content_bytes, mime)))
+        if custom_dict_csv:
+            import io
+            files.append(("custom_dict", ("custom_dict.csv", custom_dict_csv.encode("utf-8"), "text/csv")))
+        return self._post_multipart("/api/tasks", data=data, files=files)
 
     def get_task_status(self, task_id: str) -> Optional[Dict]:
         return self._get(f"/api/tasks/{task_id}")

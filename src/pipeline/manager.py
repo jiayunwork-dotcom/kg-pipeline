@@ -244,6 +244,29 @@ class TaskManager:
                     logger.error(f"  -> ERROR fetching {url}: {e}")
             logger.info(f"Task {task.task_id}: successfully fetched {len(docs)}/{len(req.urls)} URLs")
 
+        elif req.source_type == InputSourceType.FILE and req.files:
+            logger.info(f"Task {task.task_id}: processing {len(req.files)} uploaded files")
+            for i, file_info in enumerate(req.files):
+                try:
+                    filename = file_info.get("filename", f"file_{i}")
+                    content = file_info.get("content", "")
+                    if content and len(content.strip()) > 0:
+                        doc_id = f"{task.task_id}_file_{i}"
+                        logger.info(f"  File [{i+1}/{len(req.files)}]: {filename} ({len(content)} chars)")
+                        docs.append(
+                            Document(
+                                doc_id=doc_id,
+                                source_type=InputSourceType.FILE,
+                                source=filename,
+                                raw_text=content,
+                            )
+                        )
+                    else:
+                        logger.warning(f"  -> FAILED, empty content in file {filename}")
+                except Exception as e:
+                    logger.error(f"  -> ERROR processing file: {e}")
+            logger.info(f"Task {task.task_id}: successfully loaded {len(docs)}/{len(req.files)} files")
+
         return docs
 
     def _preprocess_step(self, task: PipelineTask):

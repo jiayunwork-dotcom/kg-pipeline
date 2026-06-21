@@ -77,6 +77,7 @@ class TaskCreateRequest(BaseModel):
     source_type: InputSourceType
     text: Optional[str] = None
     urls: Optional[List[str]] = None
+    files: Optional[List[Dict[str, str]]] = None
     custom_dict_csv: Optional[str] = None
 
 

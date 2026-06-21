@@ -43,8 +43,8 @@ VERB_PATTERNS: List[VerbPattern] = [
         relation="创建了",
         verbs=[
             "创立", "创建", "建立", "成立", "创办", "发起", "组建", "缔造",
-            "开设", "设立", "推出", "发布", "开发", "发明", "设计",
-            "made", "founded", "created", "established", "launched",
+            "开设", "设立", "开发", "发明", "设计",
+            "made", "founded", "created", "established",
         ],
         prepositions=["", "了", "出", "过"],
         head_first=True,
@@ -55,13 +55,34 @@ VERB_PATTERNS: List[VerbPattern] = [
     VerbPattern(
         relation="创建了",
         verbs=[
+            "推出", "发布", "launched",
+        ],
+        prepositions=["", "了", "出"],
+        head_first=True,
+        base_score=0.90,
+        head_types=["PER", "ORG"],
+        tail_types=["WORK", "PRODUCT", "TECH"],
+    ),
+    VerbPattern(
+        relation="创建了",
+        verbs=[
             "由...创立", "由...创建", "由...建立", "由...成立", "由...创办",
-            "由...发起", "由...组建", "由...缔造", "由...推出", "由...发布",
+            "由...发起", "由...组建", "由...缔造",
         ],
         head_first=False,
         base_score=0.90,
         head_types=["PER", "ORG"],
         tail_types=["ORG", "WORK", "EVENT", "PRODUCT", "TECH"],
+    ),
+    VerbPattern(
+        relation="创建了",
+        verbs=[
+            "由...推出", "由...发布",
+        ],
+        head_first=False,
+        base_score=0.88,
+        head_types=["PER", "ORG"],
+        tail_types=["WORK", "PRODUCT", "TECH"],
     ),
     VerbPattern(
         relation="隶属于",
@@ -98,7 +119,7 @@ VERB_PATTERNS: List[VerbPattern] = [
         ],
         head_first=True,
         base_score=0.86,
-        head_types=["EVENT", "TIME"],
+        head_types=["EVENT"],
         tail_types=["LOC", "GPE", "TIME"],
     ),
     VerbPattern(
@@ -157,12 +178,25 @@ VERB_PATTERNS: List[VerbPattern] = [
 FALLBACK_KEYWORDS = {
     "隶属于": ["隶属", "旗下", "子公司", "分公司", "下属", "分支"],
     "位于": ["总部", "地址", "座落", "坐落", "地处", "境内", "位于"],
-    "创建了": ["创立", "创建", "成立", "创办", "发起", "推出", "发布"],
+    "创建了": ["创立", "创建", "成立", "创办", "发起"],
+    "发布了": ["推出", "发布"],
     "参与了": ["出席", "参加", "参与", "加入", "任职", "担任", "就任"],
     "发生在": ["举行", "举办", "召开", "发生", "爆发", "进行"],
     "合作关系": ["合作", "联合", "共同", "伙伴", "战略", "签署"],
     "竞争关系": ["竞争", "对手", "抗衡", "争夺", "角逐", "竞品"],
     "子类关系": ["一种", "一类", "类型", "本质", "归类", "属于"],
+}
+
+FALLBACK_TYPE_CONSTRAINTS = {
+    "隶属于": (["ORG", "WORK", "PER", "TECH", "PRODUCT"], ["ORG", "TECH", "WORK"]),
+    "位于": (["ORG", "PER", "EVENT", "WORK", "PRODUCT"], ["LOC", "GPE"]),
+    "创建了": (["PER", "ORG"], ["ORG", "WORK", "EVENT", "PRODUCT", "TECH"]),
+    "发布了": (["PER", "ORG"], ["WORK", "PRODUCT", "TECH"]),
+    "参与了": (["PER", "ORG"], ["ORG", "EVENT", "WORK"]),
+    "发生在": (["EVENT"], ["LOC", "GPE", "TIME"]),
+    "合作关系": (["ORG", "PER"], ["ORG", "PER"]),
+    "竞争关系": (["ORG", "PER"], ["ORG", "PER"]),
+    "子类关系": (["TECH", "WORK", "PRODUCT", "ORG"], ["TECH", "WORK", "ORG"]),
 }
 
 
@@ -301,6 +335,7 @@ class REPredictor:
 
         if best_score == 0.0:
             for relation, keywords in FALLBACK_KEYWORDS.items():
+                type_constraint = FALLBACK_TYPE_CONSTRAINTS.get(relation)
                 for kw in keywords:
                     if kw in middle_text:
                         score = 0.68
@@ -309,7 +344,7 @@ class REPredictor:
                         if len(kw) >= 3:
                             score += 0.02
                         if score > best_score:
-                            directional_rels = {"创建了", "参与了", "发生在", "位于", "隶属于"}
+                            directional_rels = {"创建了", "发布了", "参与了", "发生在", "位于", "隶属于"}
                             if relation in directional_rels:
                                 result_head = e1_entity
                                 result_tail = e2_entity
@@ -317,7 +352,15 @@ class REPredictor:
                                 result_head = e1_entity
                                 result_tail = e2_entity
 
-                            best_relation = relation
+                            if type_constraint:
+                                allowed_head, allowed_tail = type_constraint
+                                if result_head.type not in allowed_head:
+                                    continue
+                                if result_tail.type not in allowed_tail:
+                                    continue
+
+                            actual_relation = "创建了" if relation == "发布了" else relation
+                            best_relation = actual_relation
                             best_score = score
                             best_head = result_head
                             best_tail = result_tail
