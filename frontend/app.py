@@ -21,6 +21,7 @@ PAGES = [
     ("📊 图谱总览", "overview"),
     ("🕸️ 图谱可视化", "graph"),
     ("🔍 实体搜索与路径", "search"),
+    ("💬 知识问答", "qa"),
     ("📋 Pipeline任务", "tasks"),
     ("📝 文档输入", "input"),
     ("✅ 质量评估", "quality"),
@@ -61,6 +62,8 @@ def init_state():
         st.session_state["current_page"] = "overview"
     if "submitted_task_id" not in st.session_state:
         st.session_state["submitted_task_id"] = None
+    if "qa_history" not in st.session_state:
+        st.session_state["qa_history"] = []
 
 
 def switch_page(page_key: str):
@@ -196,12 +199,15 @@ def page_graph_viz():
     st.title("🕸️ 图谱可视化")
     st.markdown("---")
 
+    initial_focus = st.session_state.pop("_focus_entity", "")
+
     col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([2, 1, 1])
 
     with col_ctrl1:
         focus_entity = st.text_input(
             "🔍 聚焦实体（留空显示全图）",
             placeholder="输入实体名称查看其周围子图...",
+            value=initial_focus,
         )
     with col_ctrl2:
         hops = st.slider("跳数", min_value=1, max_value=4, value=2, step=1, disabled=not focus_entity)
@@ -600,6 +606,200 @@ def page_input():
     )
 
 
+def _render_qa_history_item(idx: int, history_item: Dict[str, Any]):
+    question = history_item.get("question", "")
+    answer = history_item.get("answer", "")
+    entities = history_item.get("entities", [])
+    timestamp = history_item.get("timestamp", "")
+
+    with st.container():
+        st.markdown(f"""
+        <div style="background-color: #f8f9fa; padding: 12px; border-radius: 8px; margin-bottom: 10px;">
+            <div style="color: #666; font-size: 0.8rem; margin-bottom: 4px;">
+                🕐 {timestamp}
+            </div>
+            <div style="font-weight: 600; margin-bottom: 6px;">
+                ❓ {question}
+            </div>
+            <div style="white-space: pre-wrap; color: #333;">
+                💡 {answer}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if entities:
+            cols = st.columns(min(len(entities), 4))
+            for i, entity in enumerate(entities[:4]):
+                entity_name = entity.get("name", "")
+                entity_type = entity.get("type", "UNKNOWN")
+                color = get_entity_legend().get(entity_type, "#888")
+                with cols[i]:
+                    if st.button(
+                        f"🔍 {entity_name}",
+                        key=f"qa_hist_entity_{idx}_{i}_{entity_name}",
+                        use_container_width=True,
+                    ):
+                        st.session_state["_focus_entity"] = entity_name
+                        switch_page("graph")
+
+        st.markdown("---")
+
+
+def page_qa():
+    st.title("💬 知识问答")
+    st.markdown("---")
+
+    col_question, col_examples = st.columns([3, 2])
+
+    with col_question:
+        st.subheader("🔎 提问")
+        question_input = st.text_input(
+            "输入您的问题",
+            placeholder="例如：阿里巴巴是什么类型的实体？马云和阿里巴巴是什么关系？",
+            key="qa_question_input",
+        )
+
+        col_submit, col_clear = st.columns([1, 1])
+        with col_submit:
+            submit_clicked = st.button("🚀 提交问题", type="primary", use_container_width=True)
+        with col_clear:
+            if st.button("🗑️ 清空历史", use_container_width=True):
+                st.session_state["qa_history"] = []
+                st.rerun()
+
+        if submit_clicked and question_input.strip():
+            with st.spinner("正在分析问题并检索答案..."):
+                try:
+                    response = client.ask_question(question_input.strip())
+                    if response and response.get("success"):
+                        result = response.get("result", {})
+                        parsed = response.get("parsed_question", {})
+                        answer_text = result.get("answer_text", "抱歉，未能获取到答案。")
+                        entities = result.get("entities", [])
+                        relations = result.get("relations", [])
+                        paths = result.get("paths", [])
+
+                        history_item = {
+                            "question": question_input.strip(),
+                            "answer": answer_text,
+                            "entities": entities,
+                            "relations": relations,
+                            "paths": paths,
+                            "parsed": parsed,
+                            "timestamp": response.get("timestamp", ""),
+                        }
+
+                        st.session_state["qa_history"].insert(0, history_item)
+                        if len(st.session_state["qa_history"]) > 20:
+                            st.session_state["qa_history"] = st.session_state["qa_history"][:20]
+
+                    else:
+                        error_msg = response.get("error_message", "未知错误") if response else "未能连接到问答服务"
+                        st.error(f"❌ {error_msg}")
+                except Exception as e:
+                    st.error(f"❌ 提问失败：{e}")
+
+        st.markdown("### 📝 当前答案")
+        if st.session_state["qa_history"]:
+            latest = st.session_state["qa_history"][0]
+            answer = latest.get("answer", "")
+            entities = latest.get("entities", [])
+            parsed = latest.get("parsed", {})
+            intent = parsed.get("intent", "")
+            parsed_entities = parsed.get("entities", [])
+
+            intent_map = {
+                "attribute": "属性查询",
+                "relation": "关系查询",
+                "path": "路径查询",
+                "list": "列举查询",
+            }
+
+            with st.expander("🔧 问题解析详情", expanded=False):
+                st.write(f"**识别意图：** {intent_map.get(intent, intent)}")
+                st.write(f"**提取实体：** {', '.join(parsed_entities) if parsed_entities else '无'}")
+
+            st.markdown(f"""
+            <div style="background-color: #e8f4fd; padding: 16px; border-radius: 8px; border-left: 4px solid #4ECDC4;">
+                <div style="font-weight: 600; margin-bottom: 8px;">❓ {latest.get('question', '')}</div>
+                <div style="white-space: pre-wrap; line-height: 1.6;">💡 {answer}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if entities:
+                st.markdown("#### 🏷️ 涉及实体")
+                entity_cols = st.columns(min(len(entities), 4))
+                for i, entity in enumerate(entities[:4]):
+                    entity_name = entity.get("name", "")
+                    entity_type = entity.get("type", "UNKNOWN")
+                    color = get_entity_legend().get(entity_type, "#888")
+                    with entity_cols[i]:
+                        st.markdown(f"""
+                        <div style="background-color: {color}; color: white; padding: 8px; border-radius: 6px; text-align: center;">
+                            <div style="font-size: 0.7rem; opacity: 0.9;">{entity_type}</div>
+                            <div style="font-weight: 600;">{entity_name}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        if st.button(
+                            f"🔍 查看图谱",
+                            key=f"qa_ans_entity_{i}",
+                            use_container_width=True,
+                        ):
+                            st.session_state["_focus_entity"] = entity_name
+                            switch_page("graph")
+        else:
+            st.info("👆 请在上方输入问题并提交，答案将在这里显示。")
+
+    with col_examples:
+        st.subheader("💡 提问示例")
+
+        try:
+            intents_data = client._get("/api/qa/intents")
+            if intents_data and "intents" in intents_data:
+                for intent_info in intents_data["intents"]:
+                    with st.expander(f"📌 {intent_info.get('name', '')}", expanded=False):
+                        st.markdown(f"**说明：** {intent_info.get('description', '')}")
+                        st.markdown("**示例问题：**")
+                        for example in intent_info.get("examples", []):
+                            if st.button(
+                                f"❓ {example}",
+                                key=f"qa_example_{example}",
+                                use_container_width=True,
+                            ):
+                                st.session_state["qa_question_input"] = example
+                                st.rerun()
+        except Exception as e:
+            st.info("""
+            **可以尝试以下类型的问题：**
+
+            🏷️ **属性查询**
+            - 阿里巴巴是什么类型的实体？
+            - 马云的别名有哪些？
+
+            🔗 **关系查询**
+            - 马云和阿里巴巴是什么关系？
+            - 阿里巴巴和腾讯有什么关系？
+
+            🛤️ **路径查询**
+            - 马云和杭州是怎么关联的？
+            - 从阿里巴巴到百度的路径？
+
+            📋 **列举查询**
+            - 阿里巴巴有哪些关联的实体？
+            - 和杭州相关的实体有哪些？
+            """)
+
+    st.markdown("---")
+    st.subheader("📜 问答历史（最近20条）")
+
+    history = st.session_state.get("qa_history", [])
+    if not history:
+        st.info("暂无问答历史记录")
+    else:
+        for idx, item in enumerate(history):
+            _render_qa_history_item(idx, item)
+
+
 def page_quality():
     st.title("✅ 质量评估")
     st.markdown("---")
@@ -787,6 +987,7 @@ def main():
         "overview": page_overview,
         "graph": page_graph_viz,
         "search": page_search,
+        "qa": page_qa,
         "tasks": page_tasks,
         "input": page_input,
         "quality": page_quality,

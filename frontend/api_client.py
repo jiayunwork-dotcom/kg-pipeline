@@ -119,5 +119,11 @@ class APIClient:
     def get_quality_trend(self, limit: int = 5) -> Optional[Dict]:
         return self._get("/api/quality/trend", params={"limit": limit})
 
+    def ask_question(self, question: str) -> Optional[Dict]:
+        return self._post("/api/qa/ask", json_data={"question": question})
+
+    def parse_question(self, question: str) -> Optional[Dict]:
+        return self._post("/api/qa/parse", json_data={"question": question})
+
 
 client = APIClient()

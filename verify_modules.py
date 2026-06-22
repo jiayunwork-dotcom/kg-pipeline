@@ -18,7 +18,9 @@ modules = [
     ("src.pipeline.entity_fusion", "实体融合模块"),
     ("src.pipeline.manager", "任务管理模块"),
     ("src.pipeline.quality", "质量评估模块"),
+    ("src.pipeline.qa_service", "问答服务模块"),
     ("src.graph.store", "图谱存储模块"),
+    ("src.api.qa", "问答API模块"),
 ]
 
 print("=" * 60)

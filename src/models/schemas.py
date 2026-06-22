@@ -120,3 +120,63 @@ class GraphStats(BaseModel):
     total_relations: int
     entity_type_distribution: Dict[str, int]
     relation_type_distribution: Dict[str, int]
+
+
+class QAIntent(str, Enum):
+    ATTRIBUTE = "attribute"
+    RELATION = "relation"
+    PATH = "path"
+    LIST = "list"
+
+
+class QuestionRequest(BaseModel):
+    question: str
+
+
+class ParsedQuestion(BaseModel):
+    original_question: str
+    entities: List[str]
+    intent: QAIntent
+    query_attributes: List[str] = []
+
+
+class QAEntity(BaseModel):
+    name: str
+    type: str
+    aliases: List[str] = []
+    first_source: str = ""
+    frequency: int = 0
+
+
+class QARelation(BaseModel):
+    head: str
+    tail: str
+    relation: str
+    confidence: float = 1.0
+    head_type: str = ""
+    tail_type: str = ""
+
+
+class QAPath(BaseModel):
+    node_names: List[str]
+    node_types: List[str]
+    relation_types: List[str]
+    confidences: List[float]
+    path_length: int
+
+
+class QAResult(BaseModel):
+    answer_text: str
+    entities: List[QAEntity] = []
+    relations: List[QARelation] = []
+    paths: List[QAPath] = []
+    raw_data: Dict[str, Any] = {}
+
+
+class QAResponse(BaseModel):
+    success: bool
+    question: str
+    parsed_question: Optional[ParsedQuestion] = None
+    result: Optional[QAResult] = None
+    error_message: Optional[str] = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
