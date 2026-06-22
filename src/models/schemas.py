@@ -180,3 +180,75 @@ class QAResponse(BaseModel):
     result: Optional[QAResult] = None
     error_message: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SnapshotCreateRequest(BaseModel):
+    description: Optional[str] = None
+    task_id: Optional[str] = None
+
+
+class SnapshotEntity(BaseModel):
+    name: str
+    type: str
+    frequency: int
+
+
+class SnapshotRelation(BaseModel):
+    head: str
+    relation: str
+    tail: str
+    head_type: str
+    tail_type: str
+    confidence: float
+
+
+class Snapshot(BaseModel):
+    snapshot_id: str
+    task_id: Optional[str] = None
+    description: Optional[str] = None
+    total_entities: int = 0
+    total_relations: int = 0
+    entity_type_distribution: Dict[str, int] = Field(default_factory=dict)
+    relation_type_distribution: Dict[str, int] = Field(default_factory=dict)
+    entity_list: List[SnapshotEntity] = Field(default_factory=list)
+    relation_list: List[SnapshotRelation] = Field(default_factory=list)
+    created_at: datetime
+
+
+class SnapshotListItem(BaseModel):
+    snapshot_id: str
+    task_id: Optional[str] = None
+    description: Optional[str] = None
+    total_entities: int = 0
+    total_relations: int = 0
+    created_at: datetime
+
+
+class DiffEntity(BaseModel):
+    name: str
+    type: str
+    frequency: int
+    change_type: str
+
+
+class DiffRelation(BaseModel):
+    head: str
+    relation: str
+    tail: str
+    head_type: str
+    tail_type: str
+    confidence: float
+    change_type: str
+
+
+class SnapshotDiffResponse(BaseModel):
+    snapshot_a_id: str
+    snapshot_b_id: str
+    snapshot_a_time: datetime
+    snapshot_b_time: datetime
+    added_entities: List[SnapshotEntity] = Field(default_factory=list)
+    removed_entities: List[SnapshotEntity] = Field(default_factory=list)
+    added_relations: List[SnapshotRelation] = Field(default_factory=list)
+    removed_relations: List[SnapshotRelation] = Field(default_factory=list)
+    entity_change_count: int = 0
+    relation_change_count: int = 0

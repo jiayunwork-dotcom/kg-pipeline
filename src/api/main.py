@@ -9,6 +9,7 @@ from src.api.tasks import router as tasks_router
 from src.api.graph import router as graph_router
 from src.api.quality import router as quality_router
 from src.api.qa import router as qa_router
+from src.api.snapshots import router as snapshots_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +62,7 @@ app.include_router(tasks_router)
 app.include_router(graph_router)
 app.include_router(quality_router)
 app.include_router(qa_router)
+app.include_router(snapshots_router)
 
 
 @app.get("/")

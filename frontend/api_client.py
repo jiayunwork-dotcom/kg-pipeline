@@ -125,5 +125,29 @@ class APIClient:
     def parse_question(self, question: str) -> Optional[Dict]:
         return self._post("/api/qa/parse", json_data={"question": question})
 
+    def create_snapshot(
+        self, description: Optional[str] = None, task_id: Optional[str] = None
+    ) -> Optional[Dict]:
+        data = {}
+        if description:
+            data["description"] = description
+        if task_id:
+            data["task_id"] = task_id
+        return self._post("/api/snapshots", json_data=data)
+
+    def list_snapshots(self, limit: int = 100) -> List[Dict]:
+        result = self._get("/api/snapshots", params={"limit": limit})
+        return result or []
+
+    def get_snapshot(self, snapshot_id: str) -> Optional[Dict]:
+        return self._get(f"/api/snapshots/{snapshot_id}")
+
+    def compare_snapshots(self, snapshot_a_id: str, snapshot_b_id: str) -> Optional[Dict]:
+        params = {
+            "snapshot_a_id": snapshot_a_id,
+            "snapshot_b_id": snapshot_b_id,
+        }
+        return self._get("/api/snapshots/diff/compare", params=params)
+
 
 client = APIClient()

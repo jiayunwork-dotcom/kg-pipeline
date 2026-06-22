@@ -25,6 +25,7 @@ PAGES = [
     ("📋 Pipeline任务", "tasks"),
     ("📝 文档输入", "input"),
     ("✅ 质量评估", "quality"),
+    ("📸 版本管理", "snapshots"),
 ]
 
 PAGE_LABEL_TO_KEY = {label: key for label, key in PAGES}
@@ -863,6 +864,390 @@ def page_qa():
             _render_qa_history_item(idx, item)
 
 
+def page_snapshots():
+    st.title("📸 图谱版本管理")
+    st.markdown("---")
+
+    tab1, tab2, tab3 = st.tabs(["📋 快照列表", "🔄 版本对比", "📈 统计趋势"])
+
+    with tab1:
+        col_btn, _ = st.columns([1, 3])
+        with col_btn:
+            if st.button("📸 创建快照", type="primary", use_container_width=True):
+                with st.spinner("正在创建快照..."):
+                    try:
+                        result = client.create_snapshot(description="手动创建快照")
+                        if result:
+                            st.success("✅ 快照创建成功！")
+                            st.rerun()
+                        else:
+                            st.error("❌ 快照创建失败")
+                    except Exception as e:
+                        st.error(f"创建快照异常: {e}")
+
+        st.markdown("")
+
+        try:
+            snapshots = client.list_snapshots(limit=100)
+        except Exception as e:
+            st.error(f"获取快照列表失败: {e}")
+            snapshots = []
+
+        if not snapshots:
+            st.info("暂无快照记录，可点击上方按钮创建第一个快照，或执行Pipeline任务自动创建。")
+        else:
+            st.success(f"共找到 {len(snapshots)} 个快照")
+
+            snapshot_data = []
+            for snap in snapshots:
+                snapshot_data.append({
+                    "快照ID": snap.get("snapshot_id", ""),
+                    "创建时间": snap.get("created_at", ""),
+                    "关联任务": snap.get("task_id", "-") or "-",
+                    "描述": snap.get("description", "-") or "-",
+                    "实体总数": snap.get("total_entities", 0),
+                    "关系总数": snap.get("total_relations", 0),
+                })
+
+            df_snapshots = pd.DataFrame(snapshot_data)
+            st.dataframe(df_snapshots, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.subheader("🔍 快照详情")
+            snapshot_ids = [s["快照ID"] for s in snapshot_data]
+            selected_snapshot = st.selectbox(
+                "选择快照查看详情",
+                options=snapshot_ids,
+                index=0 if snapshot_ids else None,
+            )
+
+            if selected_snapshot:
+                try:
+                    detail = client.get_snapshot(selected_snapshot)
+                    if detail:
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("实体总数", detail.get("total_entities", 0))
+                        with col2:
+                            st.metric("关系总数", detail.get("total_relations", 0))
+                        with col3:
+                            st.metric(
+                                "实体类型数",
+                                len(detail.get("entity_type_distribution", {})),
+                            )
+                        with col4:
+                            st.metric(
+                                "关系类型数",
+                                len(detail.get("relation_type_distribution", {})),
+                            )
+
+                        col_ent, col_rel = st.columns(2)
+                        with col_ent:
+                            st.markdown("**📊 实体类型分布**")
+                            ent_dist = detail.get("entity_type_distribution", {})
+                            if ent_dist:
+                                df_ent = pd.DataFrame(
+                                    [(k, v) for k, v in ent_dist.items()],
+                                    columns=["类型", "数量"],
+                                )
+                                st.dataframe(df_ent, use_container_width=True, hide_index=True)
+                        with col_rel:
+                            st.markdown("**📊 关系类型分布**")
+                            rel_dist = detail.get("relation_type_distribution", {})
+                            if rel_dist:
+                                df_rel = pd.DataFrame(
+                                    [(k, v) for k, v in rel_dist.items()],
+                                    columns=["类型", "数量"],
+                                )
+                                st.dataframe(df_rel, use_container_width=True, hide_index=True)
+
+                        with st.expander("📋 实体列表（按频次排序，前500条）"):
+                            entity_list = detail.get("entity_list", [])
+                            if entity_list:
+                                df_ents = pd.DataFrame([
+                                    {
+                                        "实体名称": e.get("name", ""),
+                                        "类型": e.get("type", ""),
+                                        "出现频次": e.get("frequency", 0),
+                                    }
+                                    for e in entity_list
+                                ])
+                                st.dataframe(df_ents, use_container_width=True, hide_index=True)
+
+                        with st.expander("🔗 关系列表（按频次排序，前500条）"):
+                            relation_list = detail.get("relation_list", [])
+                            if relation_list:
+                                df_rels = pd.DataFrame([
+                                    {
+                                        "头实体": r.get("head", ""),
+                                        "关系": r.get("relation", ""),
+                                        "尾实体": r.get("tail", ""),
+                                        "置信度": f"{r.get('confidence', 0):.4f}",
+                                    }
+                                    for r in relation_list
+                                ])
+                                st.dataframe(df_rels, use_container_width=True, hide_index=True)
+                except Exception as e:
+                    st.error(f"获取快照详情失败: {e}")
+
+    with tab2:
+        st.subheader("🔄 选择两个快照进行对比")
+
+        try:
+            snapshots = client.list_snapshots(limit=100)
+        except Exception as e:
+            st.error(f"获取快照列表失败: {e}")
+            snapshots = []
+
+        if len(snapshots) < 2:
+            st.info("需要至少2个快照才能进行对比，请先创建更多快照。")
+        else:
+            snapshot_options = [
+                f"{s.get('snapshot_id', '')} - {s.get('created_at', '')}"
+                for s in snapshots
+            ]
+            snapshot_id_map = {
+                f"{s.get('snapshot_id', '')} - {s.get('created_at', '')}": s.get("snapshot_id", "")
+                for s in snapshots
+            }
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                selected_a = st.selectbox(
+                    "基准快照（较早版本）",
+                    options=snapshot_options,
+                    index=min(1, len(snapshot_options) - 1),
+                )
+            with col_b:
+                selected_b = st.selectbox(
+                    "对比快照（较新版本）",
+                    options=snapshot_options,
+                    index=0,
+                )
+
+            if st.button("🔍 开始对比", type="primary", use_container_width=True):
+                snap_a_id = snapshot_id_map.get(selected_a, "")
+                snap_b_id = snapshot_id_map.get(selected_b, "")
+
+                if snap_a_id == snap_b_id:
+                    st.warning("请选择两个不同的快照进行对比")
+                else:
+                    with st.spinner("正在计算差异..."):
+                        try:
+                            diff = client.compare_snapshots(snap_a_id, snap_b_id)
+                            if diff:
+                                st.session_state["snapshot_diff"] = diff
+                                st.rerun()
+                            else:
+                                st.error("对比失败")
+                        except Exception as e:
+                            st.error(f"对比异常: {e}")
+
+            if "snapshot_diff" in st.session_state and st.session_state["snapshot_diff"]:
+                diff = st.session_state["snapshot_diff"]
+
+                st.markdown("---")
+                st.subheader("📊 对比结果统计")
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("新增实体", len(diff.get("added_entities", [])))
+                with col2:
+                    st.metric("删除实体", len(diff.get("removed_entities", [])))
+                with col3:
+                    st.metric("新增关系", len(diff.get("added_relations", [])))
+                with col4:
+                    st.metric("删除关系", len(diff.get("removed_relations", [])))
+
+                st.caption(
+                    f"基准快照: {diff.get('snapshot_a_id', '')} ({diff.get('snapshot_a_time', '')}) "
+                    f"→ 对比快照: {diff.get('snapshot_b_id', '')} ({diff.get('snapshot_b_time', '')})"
+                )
+
+                st.markdown("---")
+
+                tab_add_ent, tab_del_ent, tab_add_rel, tab_del_rel = st.tabs([
+                    "🟢 新增实体",
+                    "🔴 删除实体",
+                    "🟢 新增关系",
+                    "🔴 删除关系",
+                ])
+
+                with tab_add_ent:
+                    added_ents = diff.get("added_entities", [])
+                    if not added_ents:
+                        st.info("无新增实体")
+                    else:
+                        df_add = pd.DataFrame([
+                            {
+                                "实体名称": e.get("name", ""),
+                                "类型": e.get("type", ""),
+                                "出现频次": e.get("frequency", 0),
+                            }
+                            for e in added_ents
+                        ])
+
+                        def highlight_added(s):
+                            return ["background-color: #d4edda; color: #155724"] * len(s)
+
+                        st.dataframe(
+                            df_add.style.apply(highlight_added, axis=1),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                with tab_del_ent:
+                    removed_ents = diff.get("removed_entities", [])
+                    if not removed_ents:
+                        st.info("无删除实体")
+                    else:
+                        df_del = pd.DataFrame([
+                            {
+                                "实体名称": e.get("name", ""),
+                                "类型": e.get("type", ""),
+                                "出现频次": e.get("frequency", 0),
+                            }
+                            for e in removed_ents
+                        ])
+
+                        def highlight_removed(s):
+                            return ["background-color: #f8d7da; color: #721c24"] * len(s)
+
+                        st.dataframe(
+                            df_del.style.apply(highlight_removed, axis=1),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                with tab_add_rel:
+                    added_rels = diff.get("added_relations", [])
+                    if not added_rels:
+                        st.info("无新增关系")
+                    else:
+                        df_add_rel = pd.DataFrame([
+                            {
+                                "头实体": r.get("head", ""),
+                                "关系": r.get("relation", ""),
+                                "尾实体": r.get("tail", ""),
+                                "置信度": f"{r.get('confidence', 0):.4f}",
+                            }
+                            for r in added_rels
+                        ])
+
+                        def highlight_added_rel(s):
+                            return ["background-color: #d4edda; color: #155724"] * len(s)
+
+                        st.dataframe(
+                            df_add_rel.style.apply(highlight_added_rel, axis=1),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                with tab_del_rel:
+                    removed_rels = diff.get("removed_relations", [])
+                    if not removed_rels:
+                        st.info("无删除关系")
+                    else:
+                        df_del_rel = pd.DataFrame([
+                            {
+                                "头实体": r.get("head", ""),
+                                "关系": r.get("relation", ""),
+                                "尾实体": r.get("tail", ""),
+                                "置信度": f"{r.get('confidence', 0):.4f}",
+                            }
+                            for r in removed_rels
+                        ])
+
+                        def highlight_removed_rel(s):
+                            return ["background-color: #f8d7da; color: #721c24"] * len(s)
+
+                        st.dataframe(
+                            df_del_rel.style.apply(highlight_removed_rel, axis=1),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+    with tab3:
+        st.subheader("📈 图谱规模变化趋势")
+
+        try:
+            snapshots = client.list_snapshots(limit=100)
+        except Exception as e:
+            st.error(f"获取快照列表失败: {e}")
+            snapshots = []
+
+        if not snapshots:
+            st.info("暂无快照数据，无法展示趋势图。")
+        else:
+            sorted_snapshots = sorted(
+                snapshots,
+                key=lambda x: x.get("created_at", ""),
+            )
+
+            df_trend = pd.DataFrame([
+                {
+                    "时间": s.get("created_at", ""),
+                    "实体总数": s.get("total_entities", 0),
+                    "关系总数": s.get("total_relations", 0),
+                    "快照ID": s.get("snapshot_id", ""),
+                    "描述": s.get("description", "") or "-",
+                }
+                for s in sorted_snapshots
+            ])
+
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=df_trend["时间"],
+                    y=df_trend["实体总数"],
+                    mode="lines+markers",
+                    name="实体总数",
+                    line=dict(width=3, color="#4ECDC4"),
+                    marker=dict(size=8),
+                    hovertemplate=(
+                        "时间: %{x}<br>"
+                        "实体总数: %{y}<br>"
+                        "快照ID: %{customdata[0]}<br>"
+                        "描述: %{customdata[1]}"
+                        "<extra></extra>"
+                    ),
+                    customdata=df_trend[["快照ID", "描述"]].values,
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=df_trend["时间"],
+                    y=df_trend["关系总数"],
+                    mode="lines+markers",
+                    name="关系总数",
+                    line=dict(width=3, color="#45B7D1"),
+                    marker=dict(size=8),
+                    hovertemplate=(
+                        "时间: %{x}<br>"
+                        "关系总数: %{y}<br>"
+                        "快照ID: %{customdata[0]}<br>"
+                        "描述: %{customdata[1]}"
+                        "<extra></extra>"
+                    ),
+                    customdata=df_trend["快照ID"].values,
+                )
+            )
+
+            fig.update_layout(
+                title="📈 图谱规模随时间变化趋势",
+                xaxis_title="快照时间",
+                yaxis_title="数量",
+                hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("---")
+            st.subheader("📋 趋势数据详情")
+            st.dataframe(df_trend, use_container_width=True, hide_index=True)
+
+
 def page_quality():
     st.title("✅ 质量评估")
     st.markdown("---")
@@ -1054,6 +1439,7 @@ def main():
         "tasks": page_tasks,
         "input": page_input,
         "quality": page_quality,
+        "snapshots": page_snapshots,
     }
 
     handler = handlers.get(current_page, page_overview)

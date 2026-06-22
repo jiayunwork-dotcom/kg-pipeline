@@ -639,6 +639,75 @@ class GraphStore:
             logger.error(f"Failed to get random triples: {e}")
             return []
 
+    def get_top_entities(self, limit: int = 500) -> List[Dict[str, Any]]:
+        if self._driver is None:
+            return []
+        try:
+            with self._session() as session:
+                result = session.run(
+                    """
+                    MATCH (e:Entity)
+                    RETURN
+                        e.name AS name,
+                        COALESCE(e.type, 'UNKNOWN') AS type,
+                        COALESCE(e.frequency, 1) AS frequency
+                    ORDER BY frequency DESC
+                    LIMIT $limit
+                    """,
+                    limit=limit,
+                )
+                entities = []
+                for record in result:
+                    entities.append(
+                        {
+                            "name": record["name"],
+                            "type": record["type"],
+                            "frequency": record["frequency"],
+                        }
+                    )
+                return entities
+        except Exception as e:
+            logger.error(f"Failed to get top entities: {e}")
+            return []
+
+    def get_top_relations(self, limit: int = 500) -> List[Dict[str, Any]]:
+        if self._driver is None:
+            return []
+        try:
+            with self._session() as session:
+                result = session.run(
+                    """
+                    MATCH (a)-[r:RELATES]->(b)
+                    RETURN
+                        a.name AS head,
+                        COALESCE(a.type, 'UNKNOWN') AS head_type,
+                        r.type AS relation,
+                        b.name AS tail,
+                        COALESCE(b.type, 'UNKNOWN') AS tail_type,
+                        r.confidence AS confidence,
+                        COALESCE(size(r.sentences), 1) AS freq
+                    ORDER BY freq DESC, confidence DESC
+                    LIMIT $limit
+                    """,
+                    limit=limit,
+                )
+                relations = []
+                for record in result:
+                    relations.append(
+                        {
+                            "head": record["head"],
+                            "head_type": record["head_type"],
+                            "relation": record["relation"],
+                            "tail": record["tail"],
+                            "tail_type": record["tail_type"],
+                            "confidence": record["confidence"],
+                        }
+                    )
+                return relations
+        except Exception as e:
+            logger.error(f"Failed to get top relations: {e}")
+            return []
+
     def close(self):
         if self._driver is not None:
             self._driver.close()

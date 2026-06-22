@@ -25,6 +25,7 @@ from src.pipeline.entity_fusion import EntityFusion
 from src.graph.store import GraphStore
 from src.config import settings
 from src.utils.database import db
+from src.pipeline.snapshot_manager import snapshot_manager
 
 logger = logging.getLogger(__name__)
 
@@ -407,6 +408,14 @@ class TaskManager:
                 f"entities={task.entities_extracted}, "
                 f"relations={task.relations_extracted}"
             )
+            try:
+                snapshot_manager.create_snapshot(
+                    description=f"Auto snapshot after task {task_id}",
+                    task_id=task_id,
+                )
+                logger.info(f"Auto snapshot created for task {task_id}")
+            except Exception as e:
+                logger.warning(f"Failed to create auto snapshot for task {task_id}: {e}")
         except Exception as e:
             import traceback
             trace_str = traceback.format_exc()
