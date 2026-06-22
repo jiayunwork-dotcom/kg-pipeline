@@ -40,6 +40,24 @@ class APIClient:
             logger.error(f"POST multipart {endpoint} failed: {e}")
             return None
 
+    def _put(self, endpoint: str, json_data: Optional[Dict] = None) -> Any:
+        try:
+            resp = requests.put(f"{self.base_url}{endpoint}", json=json_data, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.error(f"PUT {endpoint} failed: {e}")
+            return None
+
+    def _delete(self, endpoint: str) -> Any:
+        try:
+            resp = requests.delete(f"{self.base_url}{endpoint}", timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.error(f"DELETE {endpoint} failed: {e}")
+            return None
+
     def health_check(self) -> bool:
         result = self._get("/health")
         return result is not None
@@ -126,21 +144,49 @@ class APIClient:
         return self._post("/api/qa/parse", json_data={"question": question})
 
     def create_snapshot(
-        self, description: Optional[str] = None, task_id: Optional[str] = None
+        self,
+        description: Optional[str] = None,
+        task_id: Optional[str] = None,
+        tags: Optional[List[str]] = None,
     ) -> Optional[Dict]:
         data = {}
         if description:
             data["description"] = description
         if task_id:
             data["task_id"] = task_id
+        if tags is not None:
+            data["tags"] = tags
         return self._post("/api/snapshots", json_data=data)
 
-    def list_snapshots(self, limit: int = 100) -> List[Dict]:
-        result = self._get("/api/snapshots", params={"limit": limit})
+    def list_snapshots(
+        self, limit: int = 100, tag: Optional[str] = None
+    ) -> List[Dict]:
+        params = {"limit": limit}
+        if tag:
+            params["tag"] = tag
+        result = self._get("/api/snapshots", params=params)
         return result or []
 
     def get_snapshot(self, snapshot_id: str) -> Optional[Dict]:
         return self._get(f"/api/snapshots/{snapshot_id}")
+
+    def update_snapshot_tags(
+        self, snapshot_id: str, tags: List[str]
+    ) -> Optional[Dict]:
+        return self._put(
+            f"/api/snapshots/{snapshot_id}/tags", json_data={"tags": tags}
+        )
+
+    def update_snapshot_protected(
+        self, snapshot_id: str, is_protected: bool
+    ) -> Optional[Dict]:
+        return self._put(
+            f"/api/snapshots/{snapshot_id}/protected",
+            json_data={"is_protected": is_protected},
+        )
+
+    def delete_snapshot(self, snapshot_id: str) -> Optional[Dict]:
+        return self._delete(f"/api/snapshots/{snapshot_id}")
 
     def compare_snapshots(self, snapshot_a_id: str, snapshot_b_id: str) -> Optional[Dict]:
         params = {
@@ -148,6 +194,48 @@ class APIClient:
             "snapshot_b_id": snapshot_b_id,
         }
         return self._get("/api/snapshots/diff/compare", params=params)
+
+    def export_diff_entities_csv(
+        self, snapshot_a_id: str, snapshot_b_id: str
+    ) -> Optional[str]:
+        params = {
+            "snapshot_a_id": snapshot_a_id,
+            "snapshot_b_id": snapshot_b_id,
+        }
+        try:
+            resp = requests.get(
+                f"{self.base_url}/api/snapshots/diff/export/entities",
+                params=params,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.text
+        except Exception as e:
+            logger.error(f"Export entities CSV failed: {e}")
+            return None
+
+    def export_diff_relations_csv(
+        self, snapshot_a_id: str, snapshot_b_id: str
+    ) -> Optional[str]:
+        params = {
+            "snapshot_a_id": snapshot_a_id,
+            "snapshot_b_id": snapshot_b_id,
+        }
+        try:
+            resp = requests.get(
+                f"{self.base_url}/api/snapshots/diff/export/relations",
+                params=params,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.text
+        except Exception as e:
+            logger.error(f"Export relations CSV failed: {e}")
+            return None
+
+    def batch_compare_snapshots(self, snapshot_ids: List[str]) -> Optional[Dict]:
+        params = [("snapshot_ids", sid) for sid in snapshot_ids]
+        return self._get("/api/snapshots/diff/batch", params=params)
 
 
 client = APIClient()

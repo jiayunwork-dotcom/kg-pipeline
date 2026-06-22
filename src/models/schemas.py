@@ -185,6 +185,7 @@ class QAResponse(BaseModel):
 class SnapshotCreateRequest(BaseModel):
     description: Optional[str] = None
     task_id: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
 class SnapshotEntity(BaseModel):
@@ -206,6 +207,8 @@ class Snapshot(BaseModel):
     snapshot_id: str
     task_id: Optional[str] = None
     description: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    is_protected: bool = False
     total_entities: int = 0
     total_relations: int = 0
     entity_type_distribution: Dict[str, int] = Field(default_factory=dict)
@@ -219,6 +222,8 @@ class SnapshotListItem(BaseModel):
     snapshot_id: str
     task_id: Optional[str] = None
     description: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    is_protected: bool = False
     total_entities: int = 0
     total_relations: int = 0
     created_at: datetime
@@ -256,3 +261,26 @@ class SnapshotDiffResponse(BaseModel):
     removed_relations: List[DiffRelation] = Field(default_factory=list)
     entity_change_count: int = 0
     relation_change_count: int = 0
+
+
+class SnapshotTagsUpdateRequest(BaseModel):
+    tags: List[str] = Field(default_factory=list)
+
+
+class SnapshotProtectedUpdateRequest(BaseModel):
+    is_protected: bool
+
+
+class BatchDiffItem(BaseModel):
+    snapshot_id: str
+    snapshot_time: datetime
+    added_entities: int = 0
+    removed_entities: int = 0
+    added_relations: int = 0
+    removed_relations: int = 0
+
+
+class BatchDiffResponse(BaseModel):
+    base_snapshot_id: str
+    base_snapshot_time: datetime
+    comparisons: List[BatchDiffItem] = Field(default_factory=list)

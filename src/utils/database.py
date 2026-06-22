@@ -81,6 +81,8 @@ class Database:
                     snapshot_id TEXT PRIMARY KEY,
                     task_id TEXT,
                     description TEXT,
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    is_protected INTEGER NOT NULL DEFAULT 0,
                     total_entities INTEGER NOT NULL DEFAULT 0,
                     total_relations INTEGER NOT NULL DEFAULT 0,
                     entity_type_distribution TEXT NOT NULL DEFAULT '{}',
@@ -94,7 +96,20 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_snapshots_task ON snapshots(task_id);
                 """
             )
+
+            self._migrate_snapshots_table(conn)
+
         logger.info(f"SQLite database initialized at: {DB_PATH}")
+
+    def _migrate_snapshots_table(self, conn):
+        try:
+            conn.execute("ALTER TABLE snapshots ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE snapshots ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
 
     def save_task(self, task_data: Dict[str, Any]):
         with self._conn() as conn:
@@ -181,15 +196,18 @@ class Database:
             conn.execute(
                 """
                 INSERT INTO snapshots (
-                    snapshot_id, task_id, description, total_entities, total_relations,
+                    snapshot_id, task_id, description, tags, is_protected,
+                    total_entities, total_relations,
                     entity_type_distribution, relation_type_distribution,
                     entity_list_json, relation_list_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     snapshot_data["snapshot_id"],
                     snapshot_data.get("task_id"),
                     snapshot_data.get("description"),
+                    json.dumps(snapshot_data.get("tags", []), ensure_ascii=False),
+                    1 if snapshot_data.get("is_protected", False) else 0,
                     snapshot_data.get("total_entities", 0),
                     snapshot_data.get("total_relations", 0),
                     json.dumps(snapshot_data.get("entity_type_distribution", {}), ensure_ascii=False),
@@ -213,14 +231,22 @@ class Database:
             result["relation_type_distribution"] = json.loads(result.get("relation_type_distribution", "{}"))
             result["entity_list"] = json.loads(result.get("entity_list_json", "[]"))
             result["relation_list"] = json.loads(result.get("relation_list_json", "[]"))
+            result["tags"] = json.loads(result.get("tags", "[]"))
+            result["is_protected"] = bool(result.get("is_protected", 0))
             return result
 
-    def list_snapshots(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def list_snapshots(self, limit: int = 100, tag_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM snapshots ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            if tag_filter:
+                rows = conn.execute(
+                    "SELECT * FROM snapshots WHERE tags LIKE ? ORDER BY created_at DESC LIMIT ?",
+                    (f"%{tag_filter}%", limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM snapshots ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
             results = []
             for row in rows:
                 result = dict(row)
@@ -228,8 +254,36 @@ class Database:
                 result["relation_type_distribution"] = json.loads(result.get("relation_type_distribution", "{}"))
                 result["entity_list"] = json.loads(result.get("entity_list_json", "[]"))
                 result["relation_list"] = json.loads(result.get("relation_list_json", "[]"))
+                result["tags"] = json.loads(result.get("tags", "[]"))
+                result["is_protected"] = bool(result.get("is_protected", 0))
                 results.append(result)
             return results
+
+    def update_snapshot_tags(self, snapshot_id: str, tags: List[str]) -> bool:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "UPDATE snapshots SET tags = ? WHERE snapshot_id = ?",
+                (json.dumps(tags, ensure_ascii=False), snapshot_id),
+            )
+            return cursor.rowcount > 0
+
+    def update_snapshot_protected(self, snapshot_id: str, is_protected: bool) -> bool:
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "UPDATE snapshots SET is_protected = ? WHERE snapshot_id = ?",
+                (1 if is_protected else 0, snapshot_id),
+            )
+            return cursor.rowcount > 0
+
+    def is_snapshot_protected(self, snapshot_id: str) -> Optional[bool]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT is_protected FROM snapshots WHERE snapshot_id = ?",
+                (snapshot_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return bool(row["is_protected"])
 
     def delete_snapshot(self, snapshot_id: str) -> bool:
         with self._conn() as conn:

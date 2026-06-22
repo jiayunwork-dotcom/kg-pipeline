@@ -868,27 +868,52 @@ def page_snapshots():
     st.title("📸 图谱版本管理")
     st.markdown("---")
 
-    tab1, tab2, tab3 = st.tabs(["📋 快照列表", "🔄 版本对比", "📈 统计趋势"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 快照列表", "🔄 版本对比", "📊 批量对比", "📈 统计趋势"])
 
     with tab1:
         col_btn, _ = st.columns([1, 3])
         with col_btn:
             if st.button("📸 创建快照", type="primary", use_container_width=True):
-                with st.spinner("正在创建快照..."):
-                    try:
-                        result = client.create_snapshot(description="手动创建快照")
-                        if result:
-                            st.success("✅ 快照创建成功！")
-                            st.rerun()
-                        else:
-                            st.error("❌ 快照创建失败")
-                    except Exception as e:
-                        st.error(f"创建快照异常: {e}")
+                st.session_state["show_create_modal"] = True
+
+        if st.session_state.get("show_create_modal", False):
+            with st.form("create_snapshot_form"):
+                st.subheader("📸 创建新快照")
+                description = st.text_input("快照描述（可选）", placeholder="例如：上线前基线")
+                tags_input = st.text_input("标签（用逗号分隔，可选）", placeholder="例如：v2.0,回归测试,基线")
+                col_submit, col_cancel = st.columns(2)
+                with col_submit:
+                    submitted = st.form_submit_button("✅ 创建", type="primary", use_container_width=True)
+                with col_cancel:
+                    if st.form_submit_button("取消", use_container_width=True):
+                        st.session_state["show_create_modal"] = False
+                        st.rerun()
+
+                if submitted:
+                    tags = [t.strip() for t in tags_input.split(",") if t.strip()] if tags_input else []
+                    with st.spinner("正在创建快照..."):
+                        try:
+                            result = client.create_snapshot(
+                                description=description if description else None,
+                                tags=tags if tags else None,
+                            )
+                            if result:
+                                st.success("✅ 快照创建成功！")
+                                st.session_state["show_create_modal"] = False
+                                st.rerun()
+                            else:
+                                st.error("❌ 快照创建失败")
+                        except Exception as e:
+                            st.error(f"创建快照异常: {e}")
 
         st.markdown("")
 
+        col_filter, _ = st.columns([2, 3])
+        with col_filter:
+            tag_filter = st.text_input("🔍 按标签关键词筛选快照", placeholder="输入标签关键词...")
+
         try:
-            snapshots = client.list_snapshots(limit=100)
+            snapshots = client.list_snapshots(limit=100, tag=tag_filter if tag_filter else None)
         except Exception as e:
             st.error(f"获取快照列表失败: {e}")
             snapshots = []
@@ -898,33 +923,41 @@ def page_snapshots():
         else:
             st.success(f"共找到 {len(snapshots)} 个快照")
 
-            snapshot_data = []
+            snapshot_display_data = []
             for snap in snapshots:
-                snapshot_data.append({
+                tags = snap.get("tags", [])
+                tags_str = ", ".join(tags) if tags else "-"
+                protected_icon = "🔒 " if snap.get("is_protected", False) else ""
+                snapshot_display_data.append({
+                    "状态": protected_icon,
                     "快照ID": snap.get("snapshot_id", ""),
                     "创建时间": snap.get("created_at", ""),
-                    "关联任务": snap.get("task_id", "-") or "-",
+                    "标签": tags_str,
                     "描述": snap.get("description", "-") or "-",
                     "实体总数": snap.get("total_entities", 0),
                     "关系总数": snap.get("total_relations", 0),
                 })
 
-            df_snapshots = pd.DataFrame(snapshot_data)
+            df_snapshots = pd.DataFrame(snapshot_display_data)
             st.dataframe(df_snapshots, use_container_width=True, hide_index=True)
 
             st.markdown("---")
-            st.subheader("🔍 快照详情")
-            snapshot_ids = [s["快照ID"] for s in snapshot_data]
+            st.subheader("🔍 快照详情与操作")
+            snapshot_ids = [s.get("snapshot_id", "") for s in snapshots]
             selected_snapshot = st.selectbox(
                 "选择快照查看详情",
                 options=snapshot_ids,
                 index=0 if snapshot_ids else None,
+                format_func=lambda x: x + (" 🔒" if any(s.get("snapshot_id") == x and s.get("is_protected") for s in snapshots) else ""),
             )
 
             if selected_snapshot:
                 try:
                     detail = client.get_snapshot(selected_snapshot)
                     if detail:
+                        is_protected = detail.get("is_protected", False)
+                        tags = detail.get("tags", [])
+
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
                             st.metric("实体总数", detail.get("total_entities", 0))
@@ -940,6 +973,77 @@ def page_snapshots():
                                 "关系类型数",
                                 len(detail.get("relation_type_distribution", {})),
                             )
+
+                        st.markdown("---")
+                        col_tags, col_protect, col_delete = st.columns([3, 1, 1])
+
+                        with col_tags:
+                            st.markdown("**🏷️ 标签管理**")
+                            tags_display = ", ".join(tags) if tags else "暂无标签"
+                            st.caption(f"当前标签: {tags_display}")
+                            with st.expander("✏️ 编辑标签"):
+                                new_tags_input = st.text_input(
+                                    "标签（用逗号分隔）",
+                                    value=", ".join(tags),
+                                    key="edit_tags_input",
+                                )
+                                if st.button("💾 保存标签", key="save_tags_btn"):
+                                    new_tags = [t.strip() for t in new_tags_input.split(",") if t.strip()]
+                                    result = client.update_snapshot_tags(selected_snapshot, new_tags)
+                                    if result and result.get("success"):
+                                        st.success("✅ 标签更新成功！")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ 标签更新失败")
+
+                        with col_protect:
+                            st.markdown("**🔒 保护状态**")
+                            st.caption("受保护的快照不可删除")
+                            protect_val = st.toggle(
+                                "保护快照",
+                                value=is_protected,
+                                key="protect_toggle",
+                            )
+                            if protect_val != is_protected:
+                                result = client.update_snapshot_protected(selected_snapshot, protect_val)
+                                if result and result.get("success"):
+                                    st.success(f"✅ 保护状态已更新为: {'受保护' if protect_val else '未受保护'}")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ 保护状态更新失败")
+
+                        with col_delete:
+                            st.markdown("**🗑️ 删除快照**")
+                            st.caption("删除后不可恢复")
+                            if is_protected:
+                                st.button(
+                                    "🔒 已保护，无法删除",
+                                    disabled=True,
+                                    use_container_width=True,
+                                )
+                            else:
+                                if st.button("🗑️ 删除快照", type="secondary", use_container_width=True):
+                                    if "confirm_delete" not in st.session_state:
+                                        st.session_state["confirm_delete"] = True
+                                        st.warning("⚠️ 请确认是否要删除该快照？此操作不可恢复。")
+
+                                if st.session_state.get("confirm_delete", False):
+                                    col_yes, col_no = st.columns(2)
+                                    with col_yes:
+                                        if st.button("✅ 确认删除", type="primary", use_container_width=True, key="confirm_del_yes"):
+                                            result = client.delete_snapshot(selected_snapshot)
+                                            if result and result.get("success"):
+                                                st.success("✅ 快照已删除")
+                                                st.session_state.pop("confirm_delete", None)
+                                                st.rerun()
+                                            else:
+                                                st.error(f"❌ 删除失败: {result.get('detail', '未知错误') if result else '未知错误'}")
+                                    with col_no:
+                                        if st.button("取消", use_container_width=True, key="confirm_del_no"):
+                                            st.session_state.pop("confirm_delete", None)
+                                            st.rerun()
+
+                        st.markdown("---")
 
                         col_ent, col_rel = st.columns(2)
                         with col_ent:
@@ -1002,14 +1106,15 @@ def page_snapshots():
         if len(snapshots) < 2:
             st.info("需要至少2个快照才能进行对比，请先创建更多快照。")
         else:
-            snapshot_options = [
-                f"{s.get('snapshot_id', '')} - {s.get('created_at', '')}"
-                for s in snapshots
-            ]
-            snapshot_id_map = {
-                f"{s.get('snapshot_id', '')} - {s.get('created_at', '')}": s.get("snapshot_id", "")
-                for s in snapshots
-            }
+            snapshot_options = []
+            snapshot_id_map = {}
+            for s in snapshots:
+                tags = s.get("tags", [])
+                tags_str = f" [{'、'.join(tags)}]" if tags else ""
+                protected_icon = "🔒 " if s.get("is_protected", False) else ""
+                label = f"{protected_icon}{s.get('snapshot_id', '')} - {s.get('created_at', '')}{tags_str}"
+                snapshot_options.append(label)
+                snapshot_id_map[label] = s.get("snapshot_id", "")
 
             col_a, col_b = st.columns(2)
             with col_a:
@@ -1037,6 +1142,8 @@ def page_snapshots():
                             diff = client.compare_snapshots(snap_a_id, snap_b_id)
                             if diff:
                                 st.session_state["snapshot_diff"] = diff
+                                st.session_state["diff_snap_a_id"] = snap_a_id
+                                st.session_state["diff_snap_b_id"] = snap_b_id
                                 st.rerun()
                             else:
                                 st.error("对比失败")
@@ -1045,6 +1152,8 @@ def page_snapshots():
 
             if "snapshot_diff" in st.session_state and st.session_state["snapshot_diff"]:
                 diff = st.session_state["snapshot_diff"]
+                snap_a_id = st.session_state.get("diff_snap_a_id", "")
+                snap_b_id = st.session_state.get("diff_snap_b_id", "")
 
                 st.markdown("---")
                 st.subheader("📊 对比结果统计")
@@ -1063,6 +1172,37 @@ def page_snapshots():
                     f"基准快照: {diff.get('snapshot_a_id', '')} ({diff.get('snapshot_a_time', '')}) "
                     f"→ 对比快照: {diff.get('snapshot_b_id', '')} ({diff.get('snapshot_b_time', '')})"
                 )
+
+                col_export_ent, col_export_rel, _ = st.columns([1, 1, 2])
+                with col_export_ent:
+                    if st.button("📥 导出实体差异CSV", use_container_width=True):
+                        csv_content = client.export_diff_entities_csv(snap_a_id, snap_b_id)
+                        if csv_content:
+                            st.download_button(
+                                "⬇️ 下载实体差异CSV",
+                                data=csv_content,
+                                file_name=f"diff_entities_{snap_a_id}_{snap_b_id}.csv",
+                                mime="text/csv",
+                                key="download_ent_csv",
+                                use_container_width=True,
+                            )
+                        else:
+                            st.error("导出实体CSV失败")
+
+                with col_export_rel:
+                    if st.button("📥 导出关系差异CSV", use_container_width=True):
+                        csv_content = client.export_diff_relations_csv(snap_a_id, snap_b_id)
+                        if csv_content:
+                            st.download_button(
+                                "⬇️ 下载关系差异CSV",
+                                data=csv_content,
+                                file_name=f"diff_relations_{snap_a_id}_{snap_b_id}.csv",
+                                mime="text/csv",
+                                key="download_rel_csv",
+                                use_container_width=True,
+                            )
+                        else:
+                            st.error("导出关系CSV失败")
 
                 st.markdown("---")
 
@@ -1176,6 +1316,179 @@ def page_snapshots():
                         )
 
     with tab3:
+        st.subheader("📊 批量对比（查看演进趋势）")
+        st.caption("选择3到5个快照，以第一个为基准，查看图谱连续版本间的实体和关系变更趋势。")
+
+        try:
+            all_snapshots = client.list_snapshots(limit=100)
+        except Exception as e:
+            st.error(f"获取快照列表失败: {e}")
+            all_snapshots = []
+
+        if len(all_snapshots) < 3:
+            st.info("需要至少3个快照才能进行批量对比，请先创建更多快照。")
+        else:
+            snapshot_options = []
+            snapshot_id_map = {}
+            for s in all_snapshots:
+                tags = s.get("tags", [])
+                tags_str = f" [{'、'.join(tags)}]" if tags else ""
+                protected_icon = "🔒 " if s.get("is_protected", False) else ""
+                label = f"{protected_icon}{s.get('snapshot_id', '')} - {s.get('created_at', '')}{tags_str}"
+                snapshot_options.append(label)
+                snapshot_id_map[label] = s.get("snapshot_id", "")
+
+            selected_labels = st.multiselect(
+                "选择快照（3-5个，第一个为基准）",
+                options=snapshot_options,
+                default=snapshot_options[:min(3, len(snapshot_options))],
+                help="请选择3到5个快照进行对比，列表中第一个为基准快照",
+            )
+
+            if st.button("📊 开始批量对比", type="primary", use_container_width=True):
+                if len(selected_labels) < 3 or len(selected_labels) > 5:
+                    st.warning("请选择3到5个快照进行批量对比")
+                else:
+                    selected_ids = [snapshot_id_map[label] for label in selected_labels]
+                    with st.spinner("正在计算批量对比..."):
+                        try:
+                            result = client.batch_compare_snapshots(selected_ids)
+                            if result:
+                                st.session_state["batch_diff_result"] = result
+                                st.rerun()
+                            else:
+                                st.error("批量对比失败")
+                        except Exception as e:
+                            st.error(f"批量对比异常: {e}")
+
+            if "batch_diff_result" in st.session_state and st.session_state["batch_diff_result"]:
+                batch_result = st.session_state["batch_diff_result"]
+                comparisons = batch_result.get("comparisons", [])
+
+                if not comparisons:
+                    st.warning("没有可展示的对比数据")
+                else:
+                    st.markdown("---")
+                    st.success(f"已完成 {len(comparisons)} 组对比（基准: {batch_result.get('base_snapshot_id', '')}）")
+
+                    chart_data = []
+                    for cmp in comparisons:
+                        chart_data.append({
+                            "快照时间": cmp.get("snapshot_time", ""),
+                            "快照ID": cmp.get("snapshot_id", ""),
+                            "新增实体": cmp.get("added_entities", 0),
+                            "删除实体": cmp.get("removed_entities", 0),
+                            "新增关系": cmp.get("added_relations", 0),
+                            "删除关系": cmp.get("removed_relations", 0),
+                        })
+
+                    df_chart = pd.DataFrame(chart_data)
+
+                    fig = go.Figure()
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_chart["快照时间"],
+                            y=df_chart["新增实体"],
+                            mode="lines+markers",
+                            name="新增实体",
+                            line=dict(width=3, color="#28a745"),
+                            marker=dict(size=10),
+                            hovertemplate=(
+                                "时间: %{x}<br>"
+                                "新增实体: %{y}<br>"
+                                "快照ID: %{customdata[0]}"
+                                "<extra></extra>"
+                            ),
+                            customdata=df_chart[["快照ID"]].values,
+                        )
+                    )
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_chart["快照时间"],
+                            y=df_chart["删除实体"],
+                            mode="lines+markers",
+                            name="删除实体",
+                            line=dict(width=3, color="#dc3545"),
+                            marker=dict(size=10),
+                            hovertemplate=(
+                                "时间: %{x}<br>"
+                                "删除实体: %{y}<br>"
+                                "快照ID: %{customdata[0]}"
+                                "<extra></extra>"
+                            ),
+                            customdata=df_chart[["快照ID"]].values,
+                        )
+                    )
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_chart["快照时间"],
+                            y=df_chart["新增关系"],
+                            mode="lines+markers",
+                            name="新增关系",
+                            line=dict(width=2, color="#17a2b8", dash="dash"),
+                            marker=dict(size=8),
+                            hovertemplate=(
+                                "时间: %{x}<br>"
+                                "新增关系: %{y}<br>"
+                                "快照ID: %{customdata[0]}"
+                                "<extra></extra>"
+                            ),
+                            customdata=df_chart[["快照ID"]].values,
+                        )
+                    )
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_chart["快照时间"],
+                            y=df_chart["删除关系"],
+                            mode="lines+markers",
+                            name="删除关系",
+                            line=dict(width=2, color="#ffc107", dash="dash"),
+                            marker=dict(size=8),
+                            hovertemplate=(
+                                "时间: %{x}<br>"
+                                "删除关系: %{y}<br>"
+                                "快照ID: %{customdata[0]}"
+                                "<extra></extra>"
+                            ),
+                            customdata=df_chart[["快照ID"]].values,
+                        )
+                    )
+
+                    fig.update_layout(
+                        title="📈 图谱版本演进趋势（相对基准快照）",
+                        xaxis_title="快照时间",
+                        yaxis_title="数量",
+                        hovermode="x unified",
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        height=500,
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    st.markdown("---")
+                    st.subheader("📋 批量对比详情")
+
+                    detail_data = []
+                    for cmp in comparisons:
+                        detail_data.append({
+                            "快照ID": cmp.get("snapshot_id", ""),
+                            "快照时间": cmp.get("snapshot_time", ""),
+                            "新增实体": cmp.get("added_entities", 0),
+                            "删除实体": cmp.get("removed_entities", 0),
+                            "新增关系": cmp.get("added_relations", 0),
+                            "删除关系": cmp.get("removed_relations", 0),
+                            "实体变更总数": cmp.get("added_entities", 0) + cmp.get("removed_entities", 0),
+                            "关系变更总数": cmp.get("added_relations", 0) + cmp.get("removed_relations", 0),
+                        })
+
+                    df_detail = pd.DataFrame(detail_data)
+                    st.dataframe(df_detail, use_container_width=True, hide_index=True)
+
+    with tab4:
         st.subheader("📈 图谱规模变化趋势")
 
         try:

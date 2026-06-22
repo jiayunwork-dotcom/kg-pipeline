@@ -11,6 +11,8 @@ from src.models.schemas import (
     SnapshotListItem,
     DiffEntity,
     DiffRelation,
+    BatchDiffResponse,
+    BatchDiffItem,
 )
 from src.graph.store import GraphStore
 from src.utils.database import db
@@ -37,9 +39,11 @@ class SnapshotManager:
         self,
         description: Optional[str] = None,
         task_id: Optional[str] = None,
+        tags: Optional[List[str]] = None,
     ) -> Snapshot:
         snapshot_id = f"snap_{uuid.uuid4().hex[:12]}"
         created_at = datetime.utcnow()
+        tags = tags or []
 
         try:
             stats = self._graph.get_graph_stats()
@@ -55,6 +59,8 @@ class SnapshotManager:
             "snapshot_id": snapshot_id,
             "task_id": task_id,
             "description": description,
+            "tags": tags,
+            "is_protected": False,
             "total_entities": stats.total_entities if stats else 0,
             "total_relations": stats.total_relations if stats else 0,
             "entity_type_distribution": (
@@ -82,6 +88,8 @@ class SnapshotManager:
             snapshot_id=snapshot_id,
             task_id=task_id,
             description=description,
+            tags=tags,
+            is_protected=False,
             total_entities=snapshot_data["total_entities"],
             total_relations=snapshot_data["total_relations"],
             entity_type_distribution=snapshot_data["entity_type_distribution"],
@@ -105,6 +113,8 @@ class SnapshotManager:
             snapshot_id=data["snapshot_id"],
             task_id=data.get("task_id"),
             description=data.get("description"),
+            tags=data.get("tags", []),
+            is_protected=data.get("is_protected", False),
             total_entities=data.get("total_entities", 0),
             total_relations=data.get("total_relations", 0),
             entity_type_distribution=data.get("entity_type_distribution", {}),
@@ -116,9 +126,11 @@ class SnapshotManager:
             created_at=datetime.fromisoformat(data["created_at"]),
         )
 
-    def list_snapshots(self, limit: int = 100) -> List[SnapshotListItem]:
+    def list_snapshots(
+        self, limit: int = 100, tag_filter: Optional[str] = None
+    ) -> List[SnapshotListItem]:
         try:
-            rows = db.list_snapshots(limit=limit)
+            rows = db.list_snapshots(limit=limit, tag_filter=tag_filter)
         except Exception as e:
             logger.error(f"Failed to list snapshots: {e}")
             return []
@@ -128,12 +140,47 @@ class SnapshotManager:
                 snapshot_id=row["snapshot_id"],
                 task_id=row.get("task_id"),
                 description=row.get("description"),
+                tags=row.get("tags", []),
+                is_protected=row.get("is_protected", False),
                 total_entities=row.get("total_entities", 0),
                 total_relations=row.get("total_relations", 0),
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
             for row in rows
         ]
+
+    def update_tags(self, snapshot_id: str, tags: List[str]) -> bool:
+        try:
+            return db.update_snapshot_tags(snapshot_id, tags)
+        except Exception as e:
+            logger.error(f"Failed to update tags for snapshot {snapshot_id}: {e}")
+            return False
+
+    def update_protected(self, snapshot_id: str, is_protected: bool) -> bool:
+        try:
+            return db.update_snapshot_protected(snapshot_id, is_protected)
+        except Exception as e:
+            logger.error(
+                f"Failed to update protected status for snapshot {snapshot_id}: {e}"
+            )
+            return False
+
+    def delete_snapshot(self, snapshot_id: str) -> tuple[bool, str]:
+        try:
+            is_protected = db.is_snapshot_protected(snapshot_id)
+            if is_protected is None:
+                return False, "快照不存在"
+            if is_protected:
+                return False, "受保护的快照不允许删除"
+
+            success = db.delete_snapshot(snapshot_id)
+            if success:
+                logger.info(f"Snapshot {snapshot_id} deleted")
+                return True, "删除成功"
+            return False, "删除失败"
+        except Exception as e:
+            logger.error(f"Failed to delete snapshot {snapshot_id}: {e}")
+            return False, str(e)
 
     def compare_snapshots(
         self, snapshot_a_id: str, snapshot_b_id: str
@@ -229,6 +276,46 @@ class SnapshotManager:
             removed_relations=removed_relations,
             entity_change_count=len(added_entities) + len(removed_entities),
             relation_change_count=len(added_relations) + len(removed_relations),
+        )
+
+    def batch_compare_snapshots(
+        self, snapshot_ids: List[str]
+    ) -> Optional[BatchDiffResponse]:
+        if len(snapshot_ids) < 2:
+            return None
+
+        base_id = snapshot_ids[0]
+        base_snap = self.get_snapshot(base_id)
+        if base_snap is None:
+            return None
+
+        comparisons = []
+        for snap_id in snapshot_ids[1:]:
+            diff = self.compare_snapshots(base_id, snap_id)
+            if diff is None:
+                continue
+
+            snap = self.get_snapshot(snap_id)
+            if snap is None:
+                continue
+
+            comparisons.append(
+                BatchDiffItem(
+                    snapshot_id=snap_id,
+                    snapshot_time=snap.created_at,
+                    added_entities=len(diff.added_entities),
+                    removed_entities=len(diff.removed_entities),
+                    added_relations=len(diff.added_relations),
+                    removed_relations=len(diff.removed_relations),
+                )
+            )
+
+        comparisons.sort(key=lambda x: x.snapshot_time)
+
+        return BatchDiffResponse(
+            base_snapshot_id=base_id,
+            base_snapshot_time=base_snap.created_at,
+            comparisons=comparisons,
         )
 
 
