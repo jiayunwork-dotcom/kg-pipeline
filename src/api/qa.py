@@ -91,7 +91,7 @@ async def ask_question(request: QuestionRequest):
             )
 
         parsed = qa_service.parse_question(request.question)
-        result = qa_service.answer_question(request.question)
+        result = qa_service.answer_question(request.question, parsed_question=parsed)
 
         return QAResponse(
             success=True,

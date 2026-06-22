@@ -606,11 +606,98 @@ def page_input():
     )
 
 
+def _collect_qa_entities(qa_data: Dict[str, Any]) -> Dict[str, str]:
+    entity_map: Dict[str, str] = {}
+    legend = get_entity_legend()
+
+    for e in qa_data.get("entities", []):
+        name = e.get("name", "")
+        etype = e.get("type", "UNKNOWN")
+        if name and name not in entity_map:
+            entity_map[name] = etype
+
+    for r in qa_data.get("relations", []):
+        head = r.get("head", "")
+        tail = r.get("tail", "")
+        htype = r.get("head_type", "") or "UNKNOWN"
+        ttype = r.get("tail_type", "") or "UNKNOWN"
+        if head and head not in entity_map:
+            entity_map[head] = htype if htype in legend else "UNKNOWN"
+        if tail and tail not in entity_map:
+            entity_map[tail] = ttype if ttype in legend else "UNKNOWN"
+
+    for p in qa_data.get("paths", []):
+        names = p.get("node_names", [])
+        types = p.get("node_types", [])
+        for i, name in enumerate(names):
+            if name and name not in entity_map:
+                etype = types[i] if i < len(types) else "UNKNOWN"
+                entity_map[name] = etype if etype in legend else "UNKNOWN"
+
+    return entity_map
+
+
+def _highlight_entities_in_text(text: str, entity_map: Dict[str, str]) -> str:
+    legend = get_entity_legend()
+    if not entity_map:
+        return text.replace("\n", "<br>")
+
+    sorted_entities = sorted(entity_map.keys(), key=len, reverse=True)
+
+    result = text
+    for entity_name in sorted_entities:
+        if entity_name and entity_name in result:
+            etype = entity_map.get(entity_name, "UNKNOWN")
+            color = legend.get(etype, "#888")
+            span = (
+                f'<span style="background-color:{color};color:white;padding:1px 6px;'
+                f'border-radius:3px;font-size:0.92em;font-weight:500;'
+                f'margin:0 1px;">{entity_name}</span>'
+            )
+            result = result.replace(entity_name, span)
+
+    return result.replace("\n", "<br>")
+
+
+def _render_entity_buttons(entity_map: Dict[str, str], key_prefix: str):
+    legend = get_entity_legend()
+    if not entity_map:
+        return
+
+    entities_list = list(entity_map.items())
+    cols_per_row = 4
+    total_rows = (len(entities_list) + cols_per_row - 1) // cols_per_row
+
+    for row in range(total_rows):
+        row_items = entities_list[row * cols_per_row : (row + 1) * cols_per_row]
+        cols = st.columns(cols_per_row)
+        for i, (ename, etype) in enumerate(row_items):
+            color = legend.get(etype, "#888")
+            with cols[i]:
+                st.markdown(
+                    f'<div style="font-size:0.7rem;color:#666;margin-bottom:2px;">{etype}</div>'
+                    f'<div style="background-color:{color};color:white;padding:6px 8px;'
+                    f'border-radius:5px;font-size:0.85rem;text-align:center;'
+                    f'margin-bottom:4px;">{ename}</div>',
+                    unsafe_allow_html=True,
+                )
+                btn_key = f"{key_prefix}_{ename}"
+                if st.button(
+                    "🔍 聚焦图谱",
+                    key=btn_key,
+                    use_container_width=True,
+                    disabled=False,
+                ):
+                    st.session_state["_focus_entity"] = ename
+                    switch_page("graph")
+
+
 def _render_qa_history_item(idx: int, history_item: Dict[str, Any]):
     question = history_item.get("question", "")
     answer = history_item.get("answer", "")
-    entities = history_item.get("entities", [])
     timestamp = history_item.get("timestamp", "")
+
+    entity_map = _collect_qa_entities(history_item)
 
     with st.container():
         st.markdown(f"""
@@ -621,26 +708,15 @@ def _render_qa_history_item(idx: int, history_item: Dict[str, Any]):
             <div style="font-weight: 600; margin-bottom: 6px;">
                 ❓ {question}
             </div>
-            <div style="white-space: pre-wrap; color: #333;">
-                💡 {answer}
+            <div style="white-space: normal; color: #333; line-height: 1.7;">
+                💡 {_highlight_entities_in_text(answer, entity_map)}
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        if entities:
-            cols = st.columns(min(len(entities), 4))
-            for i, entity in enumerate(entities[:4]):
-                entity_name = entity.get("name", "")
-                entity_type = entity.get("type", "UNKNOWN")
-                color = get_entity_legend().get(entity_type, "#888")
-                with cols[i]:
-                    if st.button(
-                        f"🔍 {entity_name}",
-                        key=f"qa_hist_entity_{idx}_{i}_{entity_name}",
-                        use_container_width=True,
-                    ):
-                        st.session_state["_focus_entity"] = entity_name
-                        switch_page("graph")
+        if entity_map:
+            st.caption("🏷️ 点击下方按钮跳转到图谱可视化页面，聚焦对应实体：")
+            _render_entity_buttons(entity_map, key_prefix=f"qa_hist_{idx}")
 
         st.markdown("---")
 
@@ -703,10 +779,11 @@ def page_qa():
         if st.session_state["qa_history"]:
             latest = st.session_state["qa_history"][0]
             answer = latest.get("answer", "")
-            entities = latest.get("entities", [])
             parsed = latest.get("parsed", {})
             intent = parsed.get("intent", "")
             parsed_entities = parsed.get("entities", [])
+
+            entity_map = _collect_qa_entities(latest)
 
             intent_map = {
                 "attribute": "属性查询",
@@ -718,35 +795,21 @@ def page_qa():
             with st.expander("🔧 问题解析详情", expanded=False):
                 st.write(f"**识别意图：** {intent_map.get(intent, intent)}")
                 st.write(f"**提取实体：** {', '.join(parsed_entities) if parsed_entities else '无'}")
+                if entity_map:
+                    st.write("**答案涉及实体：**")
+                    for ename, etype in entity_map.items():
+                        st.write(f"  - {ename} ({etype})")
 
             st.markdown(f"""
             <div style="background-color: #e8f4fd; padding: 16px; border-radius: 8px; border-left: 4px solid #4ECDC4;">
                 <div style="font-weight: 600; margin-bottom: 8px;">❓ {latest.get('question', '')}</div>
-                <div style="white-space: pre-wrap; line-height: 1.6;">💡 {answer}</div>
+                <div style="white-space: normal; line-height: 1.8;">💡 {_highlight_entities_in_text(answer, entity_map)}</div>
             </div>
             """, unsafe_allow_html=True)
 
-            if entities:
-                st.markdown("#### 🏷️ 涉及实体")
-                entity_cols = st.columns(min(len(entities), 4))
-                for i, entity in enumerate(entities[:4]):
-                    entity_name = entity.get("name", "")
-                    entity_type = entity.get("type", "UNKNOWN")
-                    color = get_entity_legend().get(entity_type, "#888")
-                    with entity_cols[i]:
-                        st.markdown(f"""
-                        <div style="background-color: {color}; color: white; padding: 8px; border-radius: 6px; text-align: center;">
-                            <div style="font-size: 0.7rem; opacity: 0.9;">{entity_type}</div>
-                            <div style="font-weight: 600;">{entity_name}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        if st.button(
-                            f"🔍 查看图谱",
-                            key=f"qa_ans_entity_{i}",
-                            use_container_width=True,
-                        ):
-                            st.session_state["_focus_entity"] = entity_name
-                            switch_page("graph")
+            if entity_map:
+                st.markdown("#### 🏷️ 涉及实体（点击按钮跳转到图谱可视化）")
+                _render_entity_buttons(entity_map, key_prefix="qa_current")
         else:
             st.info("👆 请在上方输入问题并提交，答案将在这里显示。")
 

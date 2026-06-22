@@ -445,14 +445,21 @@ class QAService:
             raw_data={"subgraph": subgraph},
         )
 
-    def answer_question(self, question: str) -> QAResult:
+    def answer_question(
+        self,
+        question: str,
+        parsed_question: Optional[ParsedQuestion] = None,
+    ) -> QAResult:
         if not self.graph_store.is_connected():
             return QAResult(
                 answer_text="抱歉，知识图谱服务当前不可用，请稍后再试。",
                 raw_data={},
             )
 
-        parsed = self.parse_question(question)
+        if parsed_question is not None:
+            parsed = parsed_question
+        else:
+            parsed = self.parse_question(question)
 
         if not parsed.entities:
             return QAResult(
