@@ -69,71 +69,6 @@ async def compare_snapshots(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{snapshot_id}", response_model=Snapshot)
-async def get_snapshot(snapshot_id: str):
-    try:
-        snapshot = snapshot_manager.get_snapshot(snapshot_id)
-        if snapshot is None:
-            raise HTTPException(status_code=404, detail="Snapshot not found")
-        return snapshot
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get snapshot {snapshot_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/{snapshot_id}/tags")
-async def update_snapshot_tags(snapshot_id: str, request: SnapshotTagsUpdateRequest):
-    try:
-        success = snapshot_manager.update_tags(snapshot_id, request.tags)
-        if not success:
-            raise HTTPException(status_code=404, detail="Snapshot not found")
-        return {"success": True, "tags": request.tags}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update tags for snapshot {snapshot_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/{snapshot_id}/protected")
-async def update_snapshot_protected(
-    snapshot_id: str, request: SnapshotProtectedUpdateRequest
-):
-    try:
-        success = snapshot_manager.update_protected(snapshot_id, request.is_protected)
-        if not success:
-            raise HTTPException(status_code=404, detail="Snapshot not found")
-        return {"success": True, "is_protected": request.is_protected}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            f"Failed to update protected status for snapshot {snapshot_id}: {e}"
-        )
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/{snapshot_id}")
-async def delete_snapshot(snapshot_id: str):
-    try:
-        success, message = snapshot_manager.delete_snapshot(snapshot_id)
-        if not success:
-            if "不存在" in message:
-                raise HTTPException(status_code=404, detail=message)
-            elif "保护" in message:
-                raise HTTPException(status_code=403, detail=message)
-            else:
-                raise HTTPException(status_code=400, detail=message)
-        return {"success": True, "message": message}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to delete snapshot {snapshot_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/diff/export/entities")
 async def export_diff_entities_csv(
     snapshot_a_id: str = Query(..., description="基准快照ID"),
@@ -274,4 +209,69 @@ async def batch_compare_snapshots(snapshot_ids: List[str] = Query(..., descripti
         raise
     except Exception as e:
         logger.error(f"Failed to batch compare snapshots: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{snapshot_id}", response_model=Snapshot)
+async def get_snapshot(snapshot_id: str):
+    try:
+        snapshot = snapshot_manager.get_snapshot(snapshot_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        return snapshot
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get snapshot {snapshot_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{snapshot_id}/tags")
+async def update_snapshot_tags(snapshot_id: str, request: SnapshotTagsUpdateRequest):
+    try:
+        success = snapshot_manager.update_tags(snapshot_id, request.tags)
+        if not success:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        return {"success": True, "tags": request.tags}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update tags for snapshot {snapshot_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{snapshot_id}/protected")
+async def update_snapshot_protected(
+    snapshot_id: str, request: SnapshotProtectedUpdateRequest
+):
+    try:
+        success = snapshot_manager.update_protected(snapshot_id, request.is_protected)
+        if not success:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        return {"success": True, "is_protected": request.is_protected}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Failed to update protected status for snapshot {snapshot_id}: {e}"
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{snapshot_id}")
+async def delete_snapshot(snapshot_id: str):
+    try:
+        success, message = snapshot_manager.delete_snapshot(snapshot_id)
+        if not success:
+            if "不存在" in message:
+                raise HTTPException(status_code=404, detail=message)
+            elif "保护" in message:
+                raise HTTPException(status_code=403, detail=message)
+            else:
+                raise HTTPException(status_code=400, detail=message)
+        return {"success": True, "message": message}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete snapshot {snapshot_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
