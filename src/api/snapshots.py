@@ -39,20 +39,6 @@ async def list_snapshots(limit: int = Query(100, ge=1, le=500)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{snapshot_id}", response_model=Snapshot)
-async def get_snapshot(snapshot_id: str):
-    try:
-        snapshot = snapshot_manager.get_snapshot(snapshot_id)
-        if snapshot is None:
-            raise HTTPException(status_code=404, detail="Snapshot not found")
-        return snapshot
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get snapshot {snapshot_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/diff/compare", response_model=SnapshotDiffResponse)
 async def compare_snapshots(
     snapshot_a_id: str = Query(..., description="基准快照ID"),
@@ -69,4 +55,18 @@ async def compare_snapshots(
         raise
     except Exception as e:
         logger.error(f"Failed to compare snapshots: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{snapshot_id}", response_model=Snapshot)
+async def get_snapshot(snapshot_id: str):
+    try:
+        snapshot = snapshot_manager.get_snapshot(snapshot_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        return snapshot
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get snapshot {snapshot_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

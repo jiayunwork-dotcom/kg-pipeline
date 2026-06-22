@@ -9,6 +9,8 @@ from src.models.schemas import (
     SnapshotRelation,
     SnapshotDiffResponse,
     SnapshotListItem,
+    DiffEntity,
+    DiffRelation,
 )
 from src.graph.store import GraphStore
 from src.utils.database import db
@@ -149,20 +151,26 @@ class SnapshotManager:
         removed_entity_names = set(a_entities.keys()) - set(b_entities.keys())
 
         added_entities = [
-            SnapshotEntity(
+            DiffEntity(
                 name=b_entities[name].name,
                 type=b_entities[name].type,
                 frequency=b_entities[name].frequency,
+                change_type="added",
+                source_snapshot_id=snapshot_b_id,
+                source_snapshot_time=snap_b.created_at,
             )
             for name in added_entity_names
         ]
         added_entities.sort(key=lambda e: e.frequency, reverse=True)
 
         removed_entities = [
-            SnapshotEntity(
+            DiffEntity(
                 name=a_entities[name].name,
                 type=a_entities[name].type,
                 frequency=a_entities[name].frequency,
+                change_type="removed",
+                source_snapshot_id=snapshot_a_id,
+                source_snapshot_time=snap_a.created_at,
             )
             for name in removed_entity_names
         ]
@@ -179,26 +187,32 @@ class SnapshotManager:
         removed_rel_keys = set(a_relations.keys()) - set(b_relations.keys())
 
         added_relations = [
-            SnapshotRelation(
+            DiffRelation(
                 head=b_relations[key].head,
                 head_type=b_relations[key].head_type,
                 relation=b_relations[key].relation,
                 tail=b_relations[key].tail,
                 tail_type=b_relations[key].tail_type,
                 confidence=b_relations[key].confidence,
+                change_type="added",
+                source_snapshot_id=snapshot_b_id,
+                source_snapshot_time=snap_b.created_at,
             )
             for key in added_rel_keys
         ]
         added_relations.sort(key=lambda r: r.confidence, reverse=True)
 
         removed_relations = [
-            SnapshotRelation(
+            DiffRelation(
                 head=a_relations[key].head,
                 head_type=a_relations[key].head_type,
                 relation=a_relations[key].relation,
                 tail=a_relations[key].tail,
                 tail_type=a_relations[key].tail_type,
                 confidence=a_relations[key].confidence,
+                change_type="removed",
+                source_snapshot_id=snapshot_a_id,
+                source_snapshot_time=snap_a.created_at,
             )
             for key in removed_rel_keys
         ]

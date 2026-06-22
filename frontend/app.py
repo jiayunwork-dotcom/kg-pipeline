@@ -1083,6 +1083,8 @@ def page_snapshots():
                                 "实体名称": e.get("name", ""),
                                 "类型": e.get("type", ""),
                                 "出现频次": e.get("frequency", 0),
+                                "来源快照": e.get("source_snapshot_id", ""),
+                                "快照时间": e.get("source_snapshot_time", ""),
                             }
                             for e in added_ents
                         ])
@@ -1106,6 +1108,8 @@ def page_snapshots():
                                 "实体名称": e.get("name", ""),
                                 "类型": e.get("type", ""),
                                 "出现频次": e.get("frequency", 0),
+                                "来源快照": e.get("source_snapshot_id", ""),
+                                "快照时间": e.get("source_snapshot_time", ""),
                             }
                             for e in removed_ents
                         ])
@@ -1130,6 +1134,8 @@ def page_snapshots():
                                 "关系": r.get("relation", ""),
                                 "尾实体": r.get("tail", ""),
                                 "置信度": f"{r.get('confidence', 0):.4f}",
+                                "来源快照": r.get("source_snapshot_id", ""),
+                                "快照时间": r.get("source_snapshot_time", ""),
                             }
                             for r in added_rels
                         ])
@@ -1154,6 +1160,8 @@ def page_snapshots():
                                 "关系": r.get("relation", ""),
                                 "尾实体": r.get("tail", ""),
                                 "置信度": f"{r.get('confidence', 0):.4f}",
+                                "来源快照": r.get("source_snapshot_id", ""),
+                                "快照时间": r.get("source_snapshot_time", ""),
                             }
                             for r in removed_rels
                         ])

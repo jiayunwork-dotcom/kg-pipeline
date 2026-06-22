@@ -229,6 +229,8 @@ class DiffEntity(BaseModel):
     type: str
     frequency: int
     change_type: str
+    source_snapshot_id: str
+    source_snapshot_time: datetime
 
 
 class DiffRelation(BaseModel):
@@ -239,6 +241,8 @@ class DiffRelation(BaseModel):
     tail_type: str
     confidence: float
     change_type: str
+    source_snapshot_id: str
+    source_snapshot_time: datetime
 
 
 class SnapshotDiffResponse(BaseModel):
@@ -246,9 +250,9 @@ class SnapshotDiffResponse(BaseModel):
     snapshot_b_id: str
     snapshot_a_time: datetime
     snapshot_b_time: datetime
-    added_entities: List[SnapshotEntity] = Field(default_factory=list)
-    removed_entities: List[SnapshotEntity] = Field(default_factory=list)
-    added_relations: List[SnapshotRelation] = Field(default_factory=list)
-    removed_relations: List[SnapshotRelation] = Field(default_factory=list)
+    added_entities: List[DiffEntity] = Field(default_factory=list)
+    removed_entities: List[DiffEntity] = Field(default_factory=list)
+    added_relations: List[DiffRelation] = Field(default_factory=list)
+    removed_relations: List[DiffRelation] = Field(default_factory=list)
     entity_change_count: int = 0
     relation_change_count: int = 0
